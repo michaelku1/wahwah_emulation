@@ -1,0 +1,10 @@
+# 5 different configs
+# relative Q:
+# - 0.1
+
+# depth:
+# - 5
+
+
+filter:
+- 7.5

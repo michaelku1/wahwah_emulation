@@ -1,0 +1,9 @@
+torch
+torchaudio
+pytorch_lightning
+auraloss
+numpy
+scipy
+soundfile
+tensorboard
+pyloudnorm
