@@ -25,6 +25,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.tensorboard import SummaryWriter
 import torchaudio
+import soundfile as sf
 import numpy as np
 
 import pytorch_lightning as pl
@@ -42,7 +43,10 @@ from tqdm import tqdm
 
 global device
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# setting cuda device manually
+device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
+# release any cached memory that’s no longer needed back to the CUDA driver,
+torch.cuda.empty_cache()
 torch.backends.cudnn.benchmark = True # enable appropriate cnn algorithm for the corresponding hardware
 
 import random
@@ -76,8 +80,8 @@ def compute_mean_loss(loss_history):
 
     return mean_loss_history
 
-
 def train_loop(num_epochs,
+               last_epoch,
                train_dataloader,
                valid_dataloader,
                parameter_net,
@@ -91,25 +95,29 @@ def train_loop(num_epochs,
                preset_name):
 
       global seed
-      global last_epoch
-      global last_iter
+
+      # Initialize variables if not already set
+      if 'last_epoch' not in globals():
+          globals()['last_epoch'] = 0
+      if 'last_iter' not in globals():
+          globals()['last_iter'] = 0
 
       number_epochs_to_run = num_epochs
 
-      if last_epoch:
-        number_epochs_to_run = num_epochs - last_epoch
-        print(f'starting from model {pretrained_model_path}, with epoch number {last_epoch}')
+      if globals()['last_epoch']:
+        number_epochs_to_run = num_epochs - globals()['last_epoch']
+        print(f'starting from model {pretrained_model_path}, with epoch number {globals()["last_epoch"]}')
       else:
-        last_epoch = 0
+        globals()['last_epoch'] = 0
         number_epochs_to_run = num_epochs
         print(f'starting from epoch 1')
 
-      if last_iter != 0:
-        number_iters_to_run = num_examples_per_epoch - last_iter
-        print(f'starting from model {pretrained_model_path}, with starting iter number {last_iter}, and {number_iters_to_run} steps remaining')
+      if globals()['last_iter'] != 0:
+        number_iters_to_run = num_examples_per_epoch - globals()['last_iter']
+        print(f'starting from model {pretrained_model_path}, with starting iter number {globals()["last_iter"]}, and {number_iters_to_run} steps remaining')
 
       else:
-        last_iter = 0
+        globals()['last_iter'] = 0
         number_iters_to_run = num_examples_per_epoch
         print(f'starting iter 1, train for {number_iters_to_run} steps')
 
@@ -150,7 +158,7 @@ def train_loop(num_epochs,
               train_x = dry_train.view(-1, 1, dry_train.shape[-1]) # (bs, 1, sample_length)
               train_y = wet_train.view(-1, 1, wet_train.shape[-1]) # (bs, 1, sample_length)
               valid_x = dry_valid.view(-1, 1, dry_valid.shape[-1])
-              valid_y = wet_valid.view(-1, 1, wet_valid.shape[-1])
+              valid_y = dry_valid.view(-1, 1, dry_valid.shape[-1])
 
               # send data to device
               train_x = train_x.to(device)
@@ -158,6 +166,8 @@ def train_loop(num_epochs,
               valid_x = valid_x.to(device)
               valid_y = valid_y.to(device)
               preset = preset.to(device)
+
+
 
               # print(train_x.shape)
               # print(train_y.shape)
@@ -174,11 +184,11 @@ def train_loop(num_epochs,
               p_hat = parameter_net(preset)
               y_hat_train = wh(train_x, trainable_graphic_eq_pre, trainable_graphic_eq_post, wahwah, p_hat)
 
-              train_total_losses = 0 # batch gradient descent, so loss will be zeroed every time it is updated
+              train_total_losses = torch.tensor(0.0, device=device, requires_grad=True) # Initialize as tensor
               loss_info = {}
               for loss_name, loss_func in criterion.items():
                       loss = loss_func(y_hat_train, train_y)
-                      train_total_losses += loss
+                      train_total_losses = train_total_losses + loss
                       loss_info[loss_name] = loss.detach().cpu().item() # record each loss item, detach from graph
               loss_info['total_losses'] = train_total_losses.detach().cpu().item()
               train_loss_history.append(loss_info)
@@ -189,8 +199,8 @@ def train_loop(num_epochs,
               train_total_losses.backward()
               optimizer.step()
 
-              cur_iter_num = iter_num + last_iter
-              cur_epoch_num = epoch_num + last_epoch
+              cur_iter_num = iter_num + globals()['last_iter']
+              cur_epoch_num = epoch_num + globals()['last_epoch']
 
               print(f"training losses on iter {cur_iter_num}", loss_info)
 
@@ -199,11 +209,11 @@ def train_loop(num_epochs,
                 p_hat = parameter_net(preset)
                 y_hat_valid = wh(valid_x, trainable_graphic_eq_pre, trainable_graphic_eq_post, wahwah, p_hat)
 
-                valid_total_losses = 0 # batch gradient descent, so loss will be zeroed every time it is updated
+                valid_total_losses = torch.tensor(0.0, device=device) # Initialize as tensor
                 loss_info = {}
                 for loss_name, loss_func in criterion.items():
                         loss = loss_func(y_hat_valid, valid_y)
-                        valid_total_losses += loss
+                        valid_total_losses = valid_total_losses + loss
                         loss_info[loss_name] = loss.detach().cpu().item() # record each loss item
                 loss_info['total_losses'] = valid_total_losses.detach().cpu().item()
                 valid_loss_history.append(loss_info)
@@ -354,8 +364,6 @@ today = datetime.today()
 date_str = today.strftime("%m-%d")
 
 # dataset, config paths
-
-# dataset, config paths
 global output_dir
 
 base_path = "./"
@@ -467,19 +475,20 @@ print("preset values:", preset_values)
 # print("config settings:", config_dict)
 print("model output directory:", output_dir)
 
-
 # these will later be moved to config
 silence_threshold_energy = 1e-6 # allowable silence threshold
-silence_fraction_allowed = 0.8 # factor of number of samples allowable for silence
+silence_fraction_allowed = 0.4 # factor of number of samples allowable for silence
 n_retries = 32 # number of random chunks to sample (treated as batch size in this context)
 end_buffer_n_samples = 0 # always zero
 n_samples = 88200
 sr = 44100
-
 num_examples_per_epoch=1000
-batch_size = 1 # set to 1 for now
+batch_size = 1
 num_epochs = 100
 config_dict = None # will remove this later
+should_peak_norm = True
+num_workers = 4  # Increased from 2 to 4
+pin_memory = True
 
 dataset_train = RandomAudioChunkDataset(train_input_paths_clean,
                                         train_input_paths_wet,
@@ -490,7 +499,7 @@ dataset_train = RandomAudioChunkDataset(train_input_paths_clean,
                                         silence_threshold_energy=silence_threshold_energy,
                                         n_retries=n_retries,
                                         end_buffer_n_samples=end_buffer_n_samples,
-                                        should_peak_norm = True,
+                                        should_peak_norm = should_peak_norm,
                                         seed=12345)
 
 dataset_valid = RandomAudioChunkDataset(valid_input_paths_clean,
@@ -502,12 +511,22 @@ dataset_valid = RandomAudioChunkDataset(valid_input_paths_clean,
                                         silence_threshold_energy=silence_threshold_energy,
                                         n_retries=n_retries,
                                         end_buffer_n_samples=end_buffer_n_samples,
-                                        should_peak_norm = True,
+                                        should_peak_norm = should_peak_norm,
                                         seed=23456)
 
 # batch_size=1 means sampling (n_retries, sample_length,)
-dataloader_train = torch.utils.data.DataLoader(dataset_train, batch_size=batch_size, num_workers=2, pin_memory=True)
-dataloader_valid = torch.utils.data.DataLoader(dataset_valid, batch_size=batch_size, num_workers=2, pin_memory=True)
+dataloader_train = torch.utils.data.DataLoader(dataset_train, batch_size=batch_size, num_workers=num_workers, pin_memory=pin_memory)
+dataloader_valid = torch.utils.data.DataLoader(dataset_valid, batch_size=batch_size, num_workers=num_workers, pin_memory=pin_memory)
+
+
+# check three different chunks of chunkified audio data and save as audio files
+# for i in range(3):
+#     dry_train, wet_train = dataset_train[i]
+#     dry_train = dry_train[0].squeeze(0) # audio data
+#     wet_train = wet_train[0].squeeze(0) # audio data
+#     # save as audio files
+#     torchaudio.save(f"./dry_train_{i}.wav", dry_train, sr, backend='soundfile')
+#     torchaudio.save(f"./wet_train_{i}.wav", wet_train, sr, backend='soundfile')
 
 # get preset value as tensor
 preset_values = []
@@ -519,19 +538,19 @@ preset_values_batched = preset_values.repeat((batch_size, 1))
 preset_values_batched_unsqueezed = preset_values_batched
 preset_values_batched_unsqueezed = preset_values_batched_unsqueezed.to(device)
 
+svf = StateVariableFilter(num_filters=1, device=device)
+
 # initialise processor and parameter network and W-H
-wahwah = wah_wah(sr, processor_fn=StateVariableFilter.svf_biquads_processor_forward)
+wahwah = wah_wah(sr, processor_fn=svf.svf_biquads_processor_forward)
 num_taps = 1025
 window_size = 256
-
-exit()
 
 # check processing function type
 print("wahwah process function type:", wahwah.process_fn)
 
 parameter_net = ParameterNetwork(preset_values_batched_unsqueezed.shape[-1], wahwah.num_params) # parameter network mapping to dsp parameters
-trainable_graphic_eq_pre = ParametricEQ(num_taps, window_size=window_size, fs=44100) # pre-emphasis filter
-trainable_graphic_eq_post = ParametricEQ(num_taps, window_size=window_size, fs=44100)# post-emphasis filter
+trainable_graphic_eq_pre = ParametricEQ(sample_rate=sr) # pre-emphasis filter
+trainable_graphic_eq_post = ParametricEQ(sample_rate=sr)# post-emphasis filter
 wh = Weiner_Hammerstein()
 
 # move models to device
@@ -580,46 +599,18 @@ criterion = {"L1": nn.L1Loss(), "stft": auraloss.freq.STFTLoss()}
 # TensorBoard writer
 writer = SummaryWriter(log_dir=f'{output_dir}_runs/experiment_1')
 
-# debug
-seed = 42
-# test random indexes
-for _ in range(num_epochs):
-    for _ in range(num_examples_per_epoch):
-        seed += 1
-        random_indexes_train = dataset_train.get_permuted_indexes(seed)
-        dataset_train.set_random_indexes(random_indexes_train)
+print("--------------------------------starting training--------------------------------")
 
-        # NOTE this is the only place where we use the dataloader
-        train_data = next(iter(dataloader_train))
-        valid_data = next(iter(dataloader_valid))
-        
-    # NOTE this is the only place where we use the dataloader
-    # for batch, pbar in tqdm(enumerate(zip(dataloader_train, dataloader_valid))):
-    #     train_data, valid_data = pbar
-
-        # NOTE everything should be of size==batch 
-        (dry_train, dry_train_file_path, dry_train_start_idx), (wet_train, wet_train_file_path, wet_train_start_idx) = train_data
-        (dry_valid, dry_valid_file_path, dry_valid_start_idx), (wet_valid, wet_valid_file_path, wet_valid_start_idx) = valid_data
-
-        # breakpoint()
-
-
-# check input data shapes
-# (dry_train, dry_train_file_path, dry_train_start_idx), (wet_train, wet_train_file_path, wet_train_start_idx) = data_train
-# (dry_valid, dry_valid_file_path, dry_valid_start_idx), (wet_valid, wet_valid_file_path, wet_valid_start_idx) = data_valid
-# print(dry_train.shape)
-# print(dry_valid.shape)
-
-# train_loop(num_epochs,
-#         last_epoch,
-#         dataloader_train,
-#         dataloader_valid,
-#         parameter_net,
-#         wh,
-#         wahwah,
-#         optimizer,
-#         criterion,
-#         config_dict,
-#         preset_values_batched_unsqueezed,
-#         config_name,
-#         preset_name)
+train_loop(num_epochs,
+        last_epoch,
+        dataloader_train,
+        dataloader_valid,
+        parameter_net,
+        wh,
+        wahwah,
+        optimizer,
+        criterion,
+        config_dict,
+        preset_values_batched_unsqueezed,
+        config_name,
+        preset_name)

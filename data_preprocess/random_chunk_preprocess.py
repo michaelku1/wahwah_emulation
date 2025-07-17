@@ -36,7 +36,7 @@ class RandomAudioChunkDataset(Dataset):
             silence_threshold_energy: float = 1e-6,  # Around -60 dBFS
             n_retries: int = 10,
             check_dataset: bool = True,
-            min_suitable_files_fraction: int = 0.5,
+            min_suitable_files_fraction: float = 0.5,
             end_buffer_n_samples: int = 0,
             should_peak_norm: bool = False,
             peak_norm_db: float = -1.0,
@@ -123,46 +123,53 @@ class RandomAudioChunkDataset(Dataset):
         # print(self.input_paths_dry)
         # print(self.input_paths_wet)
         
-        # TODO 這邊要重寫
-#         if check_dataset:
-#             assert self.check_dataset_for_suitable_files(n_samples,
-#                                                          min_suitable_files_fraction
-#                                                          end_buffer_n_samples), \
-#                 "Could not find a suitable non-silent audio chunk in the dataset"
+        # NOTE dry and wet audio have different energies, so this won't work
+        # if check_dataset:
+        #     assert self.check_dataset_for_suitable_files(self.input_paths_dry,
+        #                                                 n_samples,
+        #                                                  min_suitable_files_fraction,
+        #                                                  end_buffer_n_samples), \
+        #         "Could not find a suitable non-silent audio chunk in the dataset"
+
+        #     assert self.check_dataset_for_suitable_files(self.input_paths_wet,
+        #                                                 n_samples,
+        #                                                  min_suitable_files_fraction,
+        #                                                  end_buffer_n_samples), \
+        #         "Could not find a suitable non-silent audio chunk in the dataset"
 
         # set random indexes upon initialization
         self.random_indexes = self.get_permuted_indexes(self.seed)
 
     # NOTE suitable files 是符合user定義 sample length 的 audio (這邊先check dry file就好，因為wet file跟dry file照理來說是要一樣的)
-    def check_dataset_for_suitable_files(self,
-                                         input_paths: list,
-                                         n_samples: int,
-                                         min_suitable_files_fraction: float,
-                                         end_buffer_n_samples: int = 0) -> bool:
+#     def check_dataset_for_suitable_files(self,
+#                                          input_paths: list,
+#                                          n_samples: int,
+#                                          min_suitable_files_fraction: float,
+#                                          end_buffer_n_samples: int = 0) -> bool:
         
-        min_n_suitable_files = int(min_suitable_files_fraction * len(input_paths))
-        min_n_suitable_files = max(1, min_n_suitable_files)
-        n_suitable_files = 0
+#         min_n_suitable_files = int(min_suitable_files_fraction * len(input_paths))
+#         min_n_suitable_files = max(1, min_n_suitable_files)
+#         n_suitable_files = 0
 
-        # NOTE 在for loop裡面 random sample 去找silent段
-        for file_path in tqdm(input_paths):
-            # retries 應該是load同一個file但拿不同random index
-            for _ in range(self.n_retries):
-                audio_chunk = self.find_audio_chunk_in_file(file_path, n_samples, index, end_buffer_n_samples)
-                if audio_chunk is not None:
-                    n_suitable_files += 1
-                    break
+#         # NOTE 在for loop裡面 random sample 去找silent段
+#         for file_path in tqdm(input_paths):
+#             # retries 應該是load同一個file但拿不同random index
+#             for _ in range(self.n_retries):
+#                 audio_chunk = self.find_audio_chunk_in_file(file_path, n_samples, index, end_buffer_n_samples)
+#                 if audio_chunk is not None:
+#                     n_suitable_files += 1
+#                     break
 
-        print(f"Found {n_suitable_files} suitable files out of {len(input_paths)} files ")
-        print(f"{n_suitable_files / len(input_paths) * 100:.2f}%")
+#         print(f"Found {n_suitable_files} suitable files out of {len(input_paths)} files ")
+#         print(f"{n_suitable_files / len(input_paths) * 100:.2f}%")
         
-        print(f"Found {n_suitable_files} suitable files out of {len(input_paths)} files "
-                 f"({n_suitable_files / len(input_paths) * 100:.2f}%)")
-#         log.info(f"Found {n_suitable_files} suitable files out of {len(self.input_paths)} files "
-#                  f"({n_suitable_files / len(self.input_paths) * 100:.2f}%)")
+#         print(f"Found {n_suitable_files} suitable files out of {len(input_paths)} files "
+#                  f"({n_suitable_files / len(input_paths) * 100:.2f}%)")
+# #         log.info(f"Found {n_suitable_files} suitable files out of {len(self.input_paths)} files "
+# #                  f"({n_suitable_files / len(self.input_paths) * 100:.2f}%)")
         
         
-        return n_suitable_files >= min_n_suitable_files
+#         return n_suitable_files >= min_n_suitable_files
 
     # NOTE 用energy找silence段
     def check_for_silence(self, audio_chunk: T) -> bool:
@@ -230,7 +237,7 @@ class RandomAudioChunkDataset(Dataset):
 
         # NOTE 找silence段
         if self.check_for_silence(audio_chunk):
-            print("Skipping audio chunk because of silence")
+            # print("Skipping audio chunk because of silence")
 
             # count number of silent chunks
             self.num_silent_chunks += 1
@@ -264,20 +271,18 @@ class RandomAudioChunkDataset(Dataset):
             # print(index)
             
             # debug for potentially wrong index
-            
-            # breakpoint()
             audio_chunk = self.find_audio_chunk_in_file(file_path, n_samples, random_index, end_buffer_n_samples)
             
             if audio_chunk is None:
                 n_attempts += 1
                 continue
                 
-                # NOTE TBD
-#                 if n_attempts >= self.n_retries:
-#                     assert file_path_pool, "This should never happen if `check_dataset_for_suitable_files` was run"
-#                     file_path = self.choice(file_path_pool)
-#                     file_path_pool.remove(file_path)
-#                     n_attempts = 0
+                # # NOTE TBD
+                # if n_attempts >= self.n_retries:
+                #     assert file_path_pool, "This should never happen if `check_dataset_for_suitable_files` was run"
+                #     file_path = self.choice(file_path_pool)
+                #     file_path_pool.remove(file_path)
+                #     n_attempts = 0
             
             audio_chunk_, start_idx = audio_chunk
 
