@@ -263,7 +263,6 @@ def train_loop(num_epochs,
           for loss_name, loss_value in valid_loss_history.items():
               writer.add_scalar(f"{output_dir}/valid_loss/train/{loss_name}", loss_value, epoch_num)
 
-
           model_save_path = os.path.join(output_dir, config_name + '_' + preset_name + '_' + f"epoch_{epoch_num}" + '.pt')
 
           # make model directory
@@ -333,11 +332,13 @@ class Weiner_Hammerstein(torch.nn.Module):
 
         """
 
-        # out x: (bs, sample_length)
+        # out x: (bs, 1, sample_length)
         x = trainable_graphic_eq_pre(x)
 
-        print(x.shape)
+        # torch.Size([28, 88200])
+        # torch.Size([1, 5])
 
+        # breakpoint()
         # BUG when n_retires = 1, this breaks the shape, need to consider this edge case
         # out x: (bs, sample_length)
         x = fx_processor.process_normalized(x.view(-1, x.shape[-1]), p_hat)
@@ -370,14 +371,11 @@ base_path = "./"
 # data_run_type = 'single_data'
 # data_run_type = 'all_data'
 # model_run_type = "xxx_models"
-model_run_type = "train_wh_graphic_eq_models"
+model_run_type = "train_wh_parametric_eq_models"
 store_model_path_name = f"{model_run_type}_{date_str}"
 
-# pretrained_model_path = "./single_data/single_data_train_wh_graphic_eq_models_06-19/config1_preset_config1_epoch_20.pt"
-# pretrained_model_path = "./single_data_train_wh_graphic_eq_models_07-01/preset_config1_preset_config1_epoch_1_440.pt"
-# pretrained_model_path = "./train_wh_graphic_eq_models_07-03/preset_config1_preset_config1_epoch_1_500.pt"
-pretrained_model_path = "./train_wh_graphic_eq_models_07-04/preset_config1_preset_config1_epoch_5_953.pt"
-continual_training = False
+pretrained_model_path = "./train_wh_graphic_eq_models_07-17/preset_config1_preset_config1_epoch_1_450.pt"
+continual_training = True
 
 if continual_training:
   assert os.path.exists(pretrained_model_path), "pretrained model path does not exist, please provide pretrained model path"
@@ -403,11 +401,10 @@ config_name = "preset_config1"
 
 mount_point = "/mnt/gestalt/home/mku666"
 
-train_input_paths_clean = os.path.join(mount_point, "EGDB_DI")
-train_input_paths_wet = os.path.join(mount_point, "NA_Wah/NA_WahFilter_7.5_Power_True_Bypass_False")
-# train_input_paths_wet = os.path.join(mount_point, "NA_wah_75/poly/NA_WahFilter_7.5_Power_True_Bypass_False")
-valid_input_paths_clean = os.path.join(mount_point, "EGDB_seen/EGDB_DI_train_dry")
-valid_input_paths_wet = os.path.join(mount_point, "EGDB_seen/EGDB_DI_train_wet")
+train_input_paths_clean = os.path.join(mount_point, "wah_emulation/EGDB_DI")
+train_input_paths_wet = os.path.join(mount_point, "wah_emulation/NA_Wah_75/NA_WahFilter_7.5_Power_True_Bypass_False")
+valid_input_paths_clean = os.path.join(mount_point, "wah_emulation/EGDB_seen/EGDB_NA_Wah_valid_dry")
+valid_input_paths_wet = os.path.join(mount_point, "wah_emulation/EGDB_seen/EGDB_NA_Wah_valid_gt")
 # valid_input_paths_clean = os.path.join(mount_point, "unseen/EGDB_DI_valid_dry")
 # valid_input_paths_wet = os.path.join(mount_point, "unseen/EGDB_DI_valid_wet")
 
@@ -538,6 +535,7 @@ preset_values_batched = preset_values.repeat((batch_size, 1))
 preset_values_batched_unsqueezed = preset_values_batched
 preset_values_batched_unsqueezed = preset_values_batched_unsqueezed.to(device)
 
+# initialise svf biquad
 svf = StateVariableFilter(num_filters=1, device=device)
 
 # initialise processor and parameter network and W-H

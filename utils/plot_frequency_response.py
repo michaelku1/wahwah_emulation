@@ -1,5 +1,6 @@
 
 import torch 
+import torchaudio
 import numpy as np 
 import matplotlib.pyplot as plt 
 import scipy.signal
@@ -201,7 +202,61 @@ def plot_frequency_response(x, y, fs):
     # plt.grid()
 
     # plt.tight_layout()
-    plt.show()
+    # plt.show()
+    plt.savefig('frequency_response.png', dpi=300, bbox_inches='tight')   
+    plt.close()
+
+
+def plot_measured_vs_gt_frequency_response(dry_path, wet_path, gt_path, save_path=None, show=True):
+    """
+    Plot measured (wet/dry) and groundtruth (gt/dry) frequency responses on the same plot.
+    Args:
+        dry_path: Path to dry audio file (reference input)
+        wet_path: Path to wet audio file (measured output)
+        gt_path: Path to groundtruth audio file (theoretical output)
+        save_path: If provided, save the plot to this path
+        show: If True, display the plot
+    """
+    dry, sr = torchaudio.load(dry_path, backend='soundfile')
+    wet, _ = torchaudio.load(wet_path, backend='soundfile')
+    gt, _ = torchaudio.load(gt_path, backend='soundfile')
+
+    dry = dry.numpy().squeeze()
+    wet = wet.numpy().squeeze()
+    gt = gt.numpy().squeeze()
+
+    N = min(len(dry), len(wet), len(gt))
+    dry = dry[:N]
+    wet = wet[:N]
+    gt = gt[:N]
+
+    X = fft(dry)
+    Y_wet = fft(wet)
+    Y_gt = fft(gt)
+    freqs = fftfreq(N, 1/sr)
+    idx = np.where(freqs >= 0)
+    freqs = freqs[idx]
+    H_measured = Y_wet[idx] / X[idx]
+    H_gt = Y_gt[idx] / X[idx]
+    mag_measured = 20 * np.log10(np.abs(H_measured) + 1e-12)
+    mag_gt = 20 * np.log10(np.abs(H_gt) + 1e-12)
+
+    plt.figure(figsize=(10, 6))
+    plt.plot(freqs, mag_measured, label="Measured (Wet/Dry)", alpha=0.7)
+    plt.plot(freqs, mag_gt, label="Groundtruth (GT/Dry)", alpha=0.7)
+    plt.xlabel("Frequency (Hz)")
+    plt.ylabel("Magnitude (dB)")
+    plt.title("Frequency Response: Measured vs Groundtruth")
+    plt.legend()
+    plt.grid(True, which="both", ls="--", alpha=0.5)
+    plt.xscale("log")
+    plt.xlim(20, sr//2)
+    plt.tight_layout()
+    if save_path:
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    if show:
+        plt.show()
+    plt.close()
 
 
 if __name__ == "__main__":
